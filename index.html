@@ -31,7 +31,7 @@
     <section class="card">
       <div class="card-header">
         <h2>Sesi Provider</h2>
-        <p>Tempel token/cookie tiap provider. Token dikirim ke VPS kamu sendiri (HTTPS, lewat admin endpoint). Disimpan juga di localStorage biar nggak bolak-balik ketik ulang.</p>
+        <p>Tempel token/cookie tiap provider. Token dikirim ke VPS kamu sendiri (HTTPS, lewat admin endpoint). Disimpan juga di localStorage biar nggak bolak-balik ketik ulang. <strong>Multi-akun?</strong> Tempel beberapa token dipisah koma (otomatis load-balanced per request).</p>
       </div>
       <div class="card-body">
         <div id="providerGrid" class="provider-grid"></div>
@@ -41,6 +41,7 @@
           <button id="testChatBtn" class="btn btn-ghost btn-large">💬 Test Chat</button>
         </div>
         <p class="hint" id="updateHint">Belum ada update.</p>
+        <p class="hint">🛡️ <strong>Anti-ban:</strong> CF Worker proxy + keep-alive cron (30 menit) udah aktif. Detail setup di <a href="https://github.com/ARIKO13/Gateway-LLM/blob/main/ANTI-BAN.md" target="_blank" rel="noopener">ANTI-BAN.md</a>.</p>
       </div>
     </section>
 
