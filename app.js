@@ -26,8 +26,8 @@ const PROVIDERS = {
   deepseek: {
     name: 'DeepSeek',
     vendor: 'DeepSeek AI',
-    placeholder: 'eyJ... (userToken cookie)',
-    help: 'Login chat.deepseek.com → kirim pesan dulu → F12 → Application → Cookies → cari "userToken" → copy VALUE (JWT, mulai "eyJ")',
+    placeholder: 'eyJ... atau token1,token2,token3 (multi-akun)',
+    help: 'Login chat.deepseek.com → kirim pesan → F12 → Application → Cookies → userToken → copy VALUE (JWT, mulai "eyJ"). Multi-akun: tempel beberapa token dipisah koma. Jangan klik logout di browser!',
     loginUrl: 'https://chat.deepseek.com',
     models: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner', 'deepseek-r1'],
     defaultModel: 'deepseek-chat',
