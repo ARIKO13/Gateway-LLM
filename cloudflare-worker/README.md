@@ -1,108 +1,169 @@
-# Cloudflare Worker Proxy untuk DeepSeek
+# Cloudflare Worker: Multi-Provider LLM Proxy
 
-Hide VPS IP dari DeepSeek — DeepSeek liat IP Cloudflare (reputation tinggi), bukan IP datacenter VPS kamu.
+Hide IP VPS dari DeepSeek, Kimi, GLM, dan Qwen dalam **1 Worker**.
 
-## Kenapa butuh ini
+## Arsitektur
 
-Tanpa proxy, vinlic deepseek-api call `chat.deepseek.com` langsung dari VPS. DeepSeek liat IP `176.100.37.238` (datacenter, mudah di-block). Setelah beberapa request dalam waktu singkat → risiko IP dibanned naik.
-
-Dengan proxy, alurnya:
 ```
-Web app → VPS vinlic → Cloudflare Worker → DeepSeek
-                          ↑ IP edge CF (clean, residence-like reputation)
+Web app → VPS vinlic (4 containers) → CF Worker → provider asli
+                                       ├─ /deepseek/* → chat.deepseek.com
+                                       ├─ /kimi/*     → kimi.moonshot.cn
+                                       ├─ /glm/*      → chatglm.cn
+                                       └─ /qwen/*     → tongyi.aliyun.com
 ```
+
+Worker route by path prefix, strip prefix, proxy ke origin. Host header di-set per-provider biar SNI matching.
 
 ## Setup (5 menit)
 
-### 1. Buat Cloudflare account (kalau belum)
-- Buka https://dash.cloudflare.com
-- Signup free, verify email
+### 1. Buat Cloudflare account
+- https://dash.cloudflare.com → signup free, verify email
 
 ### 2. Create Worker
 - Sidebar kiri: **Workers & Pages**
 - Klik **Create application** → **Create Worker**
-- Beri nama: `deepseek-proxy` (atau apa pun)
+- Beri nama: `llm-proxy` (atau apa pun)
 - Klik **Deploy** (default hello-world dulu)
-- Setelah terbuat, klik **Edit code** di kanan atas
+- Klik **Edit code**
 
 ### 3. Paste Worker script
-- Hapus semua kode default (hello world)
-- Buka file `worker.js` dari repo ini
+- Hapus semua kode default
+- Buka file `worker.js` dari folder `cloudflare-worker/` di repo ini
 - Copy semua, paste ke editor Cloudflare
-- Klik **Deploy** (kanan atas)
+- Klik **Deploy** di kanan atas
 
-### 4. Test Worker
+### 4. Test Worker (per provider, kalau udah punya token)
 ```bash
-# Ganti URL dengan punya kamu
-curl https://deepseek-proxy.NAMAKAMU.workers.dev/api/v0/users/current \
-  -H "Authorization: Bearer 1EDVrkjBDxA2ZzcmiptF1egj/VvM1sx+KJ7+uIJqpq4kClr1l8L1tGJtkUlHBYqT"
+# DeepSeek
+curl https://llm-proxy.NAMAKAMU.workers.dev/deepseek/api/v0/users/current \
+  -H "Authorization: Bearer <deepseek_userToken>"
+
+# Kimi (refresh token test, expected: JSON error karena butuh POST body, tapi status 200)
+curl https://llm-proxy.NAMAKAMU.workers.dev/kimi/api/auth/token/refresh \
+  -H "Authorization: Bearer <kimi_refresh_token>"
+
+# 404 kalau path nggak match prefix manapun
+curl https://llm-proxy.NAMAKAMU.workers.dev/foo/bar
+# → {"error":"unknown_provider","message":"Path must start with: /deepseek/, /kimi/, /glm/, /qwen/"}
 ```
 
-Expected response:
-```json
-{"code":0,"msg":"","data":{"biz_data":{"id":"...","email":"ars****de@gmail.com",...}}}
-```
-
-Kalau error, cek log di Cloudflare dashboard.
-
-### 5. Update VPS pakai proxy
-SSH ke VPS:
+### 5. Set env vars di VPS
 ```bash
 ssh root@176.100.37.238
 
-# Set env var
-echo 'DEEPSEEK_PROXY_URL=https://deepseek-proxy.NAMAKAMU.workers.dev' >> /opt/gateway-llm/.env
+cat >> /opt/gateway-llm/.env <<EOF
+DEEPSEEK_PROXY_URL=https://llm-proxy.NAMAKAMU.workers.dev/deepseek
+KIMI_PROXY_URL=https://llm-proxy.NAMAKAMU.workers.dev/kimi
+GLM_PROXY_URL=https://llm-proxy.NAMAKAMU.workers.dev/glm
+QWEN_PROXY_URL=https://llm-proxy.NAMAKAMU.workers.dev/qwen
+EOF
 
-# Recreate container biar env var ke-load
-cd /opt/gateway-llm && docker compose up -d --force-recreate --no-deps deepseek-api
+# Recreate semua container biar env var ke-load
+cd /opt/gateway-llm && docker compose up -d --force-recreate
 ```
 
-### 6. Test chat dari VPS (sekarang via proxy)
+### 6. Verifikasi proxy aktif
 ```bash
+# Cek env vars di tiap container
+docker exec kimi-api env | grep PROXY_URL
+docker exec glm-api env | grep PROXY_URL
+docker exec qwen-api env | grep PROXY_URL
+docker exec deepseek-api env | grep PROXY_URL
+
+# Expected output (per provider):
+# KIMI_PROXY_URL=https://llm-proxy.kamu.workers.dev/kimi
+# ...dst
+```
+
+### 7. Test chat end-to-end
+```bash
+# DeepSeek
 curl -X POST https://176-100-37-238.sslip.io/deepseek/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer 1EDVrkjBDxA2ZzcmiptF1egj/VvM1sx+KJ7+uIJqpq4kClr1l8L1tGJtkUlHBYqT" \
-  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"test"}]}'
+  -H "Authorization: Bearer <deepseek_userToken>" \
+  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"halo"}]}'
+
+# Kalau response berisi "content": "..." → semua jalan:
+# VPS → CF Worker → DeepSeek (with CF IP, not VPS IP) → response → back
 ```
 
-Harusnya tetap jalan, tapi sekarang request ke DeepSeek lewat CF.
+## Stripping logic (apa yang Worker hapus)
 
-## Verifikasi proxy aktif
+Worker menghapus headers berikut dari request ke provider asli, biar provider nggak detect ini dipanggil via Cloudflare Worker:
 
-Cek log deepseek-api, request yang tadinya langsung ke `chat.deepseek.com` sekarang harusnya lewat Worker URL:
+- `cf-connecting-ip` (IP client Worker)
+- `cf-ipcountry` (negara client Worker)
+- `cf-ray`, `cf-visitor`, `cf-worker` (CF-specific headers)
+- `x-forwarded-for`, `x-forwarded-proto` (proxy chain)
+- `x-real-ip`, `true-client-ip` (real IP headers)
+
+Worker juga hapus headers berikut dari response balik ke client (CORS issues):
+- `cf-cache-status`, `cf-ray`, `cf-warp-tag`
+
+Plus nambahin CORS headers (`Access-Control-Allow-Origin: *`) biar web app Pages bisa call langsung ke Worker kalau mau.
+
+## Provider-specific notes
+
+### DeepSeek
+- Origin: `https://chat.deepseek.com`
+- Host header: `chat.deepseek.com`
+- Vinlic patched: read `DEEPSEEK_PROXY_URL` env var, fallback direct
+- **Plus 5 patches lain** buat handle DeepSeek API baru (Content-Type, getIPAddress, createSession, SSE parser, v-field handler)
+
+### Kimi
+- Origin: `https://kimi.moonshot.cn`
+- Host header: `kimi.moonshot.cn`
+- Vinlic patched: read `KIMI_PROXY_URL` env var
+- Auth: refresh_token cookie dari kimi.com (F12 → Application → Cookies → `refresh_token`)
+
+### GLM
+- Origin: `https://chatglm.cn`
+- Host header: `chatglm.cn`
+- Vinlic patched: read `GLM_PROXY_URL` env var
+- Auth: refresh token (F12 → Network → cari request ke `/user/refresh` → copy Bearer)
+
+### Qwen (2 domain!)
+- Main origin: `https://tongyi.aliyun.com` (`QWEN_PROXY_URL`)
+- Alt origin: `https://qianwen.biz.aliyun.com` (`QWEN_BIZ_PROXY_URL` — optional, kalau nggak di-set bakal direct)
+- OSS storage `https://broadscope-dialogue-new.oss-cn-beijing.aliyuncs.com` — nggak di-proxy (file upload, jarang dipakai)
+- Auth: `login_aliyunid_ticket` atau `tongyi_sso_ticket` cookie value
+
+## Disable proxy (balik direct)
+
+Hapus env vars dari .env, recreate container:
 ```bash
-docker compose logs deepseek-api | grep -i "deepseek.com\|workers.dev"
+ssh root@176.100.37.238
+sed -i '/_PROXY_URL/d' /opt/gateway-llm/.env
+cd /opt/gateway-llm && docker compose up -d --force-recreate
 ```
 
-## Limit free tier Cloudflare
+## Free tier Cloudflare Workers
 
-- 100k requests/day (personal use + keep-alive cron tiap 30 menit = 48 req/day, masih jauh dari limit)
+- 100,000 requests/day (cukup untuk personal use + keep-alive cron tiap 30 menit × 4 provider = 192 req/day, jauh dari limit)
 - 1000 req/min per worker
-- 10ms CPU per request (streaming SSE nggak dihitung CPU, hanya transformasi)
-- Untuk pemakaian personal, free tier CUKUP
+- 10ms CPU per request (streaming SSE I/O nggak dihitung CPU)
+- Untuk pemakaian personal, free tier CUKUP banget
 
 ## Troubleshooting
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Worker exceeded CPU limit` | Worker ngapain terlalu berat | Pastikan cuma proxy, no JSON parsing |
-| `fetch failed: DNS resolution` | chat.deepseek.com unreachable dari CF | Tunggu, biasanya transient |
-| `522 Origin Connection Timeout` | DeepSeek nge-block IP CF tertentu | Coba deploy di region CF lain, atau switch ke workers.dev subdomain |
-| Response tetap kosong / 422 | Worker nggak forward header dengan benar | Lihat log Worker di dashboard CF |
+| `unknown_provider` (404) | Path nggak mulai dengan `/deepseek/`, `/kimi/`, `/glm/`, atau `/qwen/` | Cek URL env var harus ends with provider prefix (mis: `.../deepseek`, bukan `.../deepseek/`) |
+| `Stream response error` di vinlic log | CF Worker timeout atau provider balas error | Cek log Worker di dashboard CF |
+| `Host header mismatch` error | Provider nolak karena SNI/Host beda | Worker otomatis set Host, jangan override di vinlic |
+| Response 200 tapi content kosong | Vinlic parser issue (bukan proxy issue) | Lihat log vinlic, mungkin butuh patch SSE parser seperti DeepSeek |
+| Worker exceeded CPU limit | Worker ngapain terlalu berat | Pastikan cuma proxy, no JSON parsing di Worker |
+| 522 Origin Connection Timeout | Provider nge-block IP CF tertentu | Coba deploy di region CF lain, atau skip proxy buat provider itu |
 
-## Notes
+## Cost breakdown
 
-- **Worker script** strip headers CF-specific (`cf-connecting-ip`, `cf-ray`, dll) biar DeepSeek nggak detect ini dipanggil via CF Worker
-- **Worker script** add CORS headers biar web app (Pages) bisa call langsung ke Worker kalau mau
-- **Host header** di-set ke `chat.deepseek.com` biar SNI matching (kalau nggak, DeepSeek bisa reject)
-- **Streaming SSE** lewat Worker tanpa masalah (CF pass through ReadableStream)
-- **Worker URL** selalu HTTPS, jadi VPS→Worker→DeepSeek semua encrypted
+- Cloudflare Workers: FREE (untuk penggunaan personal)
+- VPS Hetzner/DO (1 IP): ~$5/bulan (sudah ada)
+- Domain (kalau mau ganti sslip.io): ~$10/tahun (opsional)
+- **Total**: $5/bulan untuk 4 LLM providers + auto-renew token via keep-alive cron
 
-## Disable proxy (kalau mau balik direct)
-
-```bash
-# Hapus env var
-sed -i '/DEEPSEEK_PROXY_URL/d' /opt/gateway-llm/.env
-# Restart container
-cd /opt/gateway-llm && docker compose up -d --force-recreate --no-deps deepseek-api
-```
+Bandung-2 di-IP-banned setiap provider tiap bulan nggak akan terjadi selama kamu:
+1. Pakai CF Worker (IP edge CF, bukan IP VPS)
+2. Pakai multi-token pooling (kalau punya 2+ akun)
+3. Nggak hammer 1000 request per menit
+4. Keep-alive cron jalan tiap 30 menit (sudah default)
