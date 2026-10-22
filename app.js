@@ -283,7 +283,10 @@ async function sendChat() {
   try {
     const r = await fetch(VPS_URL + p.pathPrefix + '/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer not-needed',  // vinlic/*-free-api wajib header ini
+      },
       body: JSON.stringify({ model, messages }),
       signal: AbortSignal.timeout(30000),
     });
@@ -310,7 +313,10 @@ async function refreshModels() {
   if (!state.tokens[key]) { toast(`Isi token ${p.name} dulu`, 'warn'); return; }
   toast('Fetch model list...', 'info');
   try {
-    const r = await fetch(VPS_URL + p.pathPrefix + '/v1/models', { signal: AbortSignal.timeout(10000) });
+    const r = await fetch(VPS_URL + p.pathPrefix + '/v1/models', {
+      headers: { 'Authorization': 'Bearer not-needed' },  // vinlic wajib
+      signal: AbortSignal.timeout(10000)
+    });
     if (!r.ok) { toast('HTTP ' + r.status, 'error'); return; }
     const d = await r.json();
     const ids = (d?.data || []).map(m => m.id).filter(Boolean);
