@@ -14,36 +14,40 @@ const ADMIN_TOKEN = 'EN5jLt735zkypxm9c7iEHlAitlcf7cZq0E7nCq35ei8';
 // ============================================================
 const PROVIDERS = {
   kimi: {
-    name: 'Kimi', vendor: 'Moonshot AI',
-    placeholder: 'eyJhbGciOiJIUzI1...',
-    help: 'Login kimi.com → F12 → Application → Cookies → refresh_token (JWT)',
+    name: 'Kimi',
+    vendor: 'Moonshot AI',
+    placeholder: 'eyJhbGciOiJIUzI1... (refresh_token cookie)',
+    help: 'Login kimi.com → F12 → Application → Cookies → cari "refresh_token" → copy VALUE (JWT, mulai "eyJ")',
     loginUrl: 'https://kimi.com',
     models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k', 'kimi-latest'],
     defaultModel: 'moonshot-v1-8k',
     pathPrefix: '/kimi',
   },
   deepseek: {
-    name: 'DeepSeek', vendor: 'DeepSeek AI',
-    placeholder: 'userToken=...; cf_clearance=...; ...',
-    help: 'Login chat.deepseek.com → F12 → Network → reload → klik request → Cookie header',
+    name: 'DeepSeek',
+    vendor: 'DeepSeek AI',
+    placeholder: 'eyJ... (userToken cookie)',
+    help: 'Login chat.deepseek.com → kirim pesan dulu → F12 → Application → Cookies → cari "userToken" → copy VALUE (JWT, mulai "eyJ")',
     loginUrl: 'https://chat.deepseek.com',
-    models: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner'],
+    models: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner', 'deepseek-r1'],
     defaultModel: 'deepseek-chat',
     pathPrefix: '/deepseek',
   },
   glm: {
-    name: 'GLM', vendor: 'Zhipu AI',
-    placeholder: 'sessionID=...; token=...; ...',
-    help: 'Login chatglm.cn → F12 → Network → reload → klik request → Cookie header',
+    name: 'GLM',
+    vendor: 'Zhipu AI',
+    placeholder: 'refresh token (chatglm.cn)',
+    help: 'Login chatglm.cn → kirim pesan → F12 → Network → cari request "user/refresh" → copy Bearer di Authorization header',
     loginUrl: 'https://chatglm.cn',
     models: ['glm-4', 'glm-4-flash', 'glm-4-air', 'glm-4-longcontext'],
     defaultModel: 'glm-4',
     pathPrefix: '/glm',
   },
   qwen: {
-    name: 'Qwen', vendor: 'Alibaba Tongyi',
-    placeholder: 'login_aliyid_t=...; cna=...; ...',
-    help: 'Login tongyi.aliyun.com → F12 → Network → reload → Cookie header',
+    name: 'Qwen',
+    vendor: 'Alibaba Tongyi',
+    placeholder: 'login_aliyunid_ticket cookie value',
+    help: 'Login tongyi.aliyun.com → F12 → Application → Cookies → cari "login_aliyunid_ticket" atau "tongyi_sso_ticket" → copy VALUE',
     loginUrl: 'https://tongyi.aliyun.com',
     models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen2-72b'],
     defaultModel: 'qwen-max',
@@ -285,7 +289,8 @@ async function sendChat() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer not-needed',  // vinlic/*-free-api wajib header ini
+        // Token user jadi Bearer — vinlic/*-free-api pakai ini sebagai refresh token
+        'Authorization': 'Bearer ' + state.tokens[key],
       },
       body: JSON.stringify({ model, messages }),
       signal: AbortSignal.timeout(30000),
@@ -314,7 +319,7 @@ async function refreshModels() {
   toast('Fetch model list...', 'info');
   try {
     const r = await fetch(VPS_URL + p.pathPrefix + '/v1/models', {
-      headers: { 'Authorization': 'Bearer not-needed' },  // vinlic wajib
+      headers: { 'Authorization': 'Bearer ' + state.tokens[key] },  // vinlic wajib Bearer
       signal: AbortSignal.timeout(10000)
     });
     if (!r.ok) { toast('HTTP ' + r.status, 'error'); return; }
