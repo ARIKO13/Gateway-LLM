@@ -3,204 +3,93 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gateway-LLM · Multi-Provider AI Router</title>
-  <meta name="description" content="Konfigurasi multi-provider LLM gateway (Kimi, DeepSeek, GLM, Qwen) — input sesi, auto-generate API endpoint OpenAI-compatible.">
+  <title>Gateway-LLM</title>
+  <meta name="description" content="Input sesi → API otomatis jadi. Multi-provider LLM router.">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
 </head>
 <body>
-  <!-- ===================== HEADER ===================== -->
   <header class="app-header">
     <div class="header-inner">
       <div class="brand">
-        <div class="brand-icon">🛰️</div>
-        <div class="brand-text">
+        <span class="brand-icon">🛰️</span>
+        <div>
           <h1>Gateway-LLM</h1>
-          <p>Multi-Provider AI Router · Kimi · DeepSeek · GLM · Qwen</p>
+          <p>Input sesi → API otomatis jadi</p>
         </div>
       </div>
-      <div class="header-status">
-        <span class="status-pill" id="vpsStatus">
-          <span class="dot dot-gray"></span>
-          <span class="status-text">VPS belum diset</span>
-        </span>
+      <div id="vpsStatus" class="status-pill">
+        <span class="dot dot-gray"></span>
+        <span class="status-text">Cek status...</span>
       </div>
     </div>
   </header>
 
   <main class="container">
 
-    <!-- ===================== SECTION 1: VPS CONFIG ===================== -->
-    <section class="card" id="vpsConfig">
+    <!-- Provider input section -->
+    <section class="card">
       <div class="card-header">
-        <h2>1. VPS / Backend URL</h2>
-        <p class="card-subtitle">Alamat VPS tempat kamu men-deploy <code>llm-router</code>. Tanpa ini, web app tidak bisa test koneksi atau chat.</p>
+        <h2>Sesi Provider</h2>
+        <p>Tempel token/cookie tiap provider. Token dikirim ke VPS kamu sendiri (HTTPS, lewat admin endpoint). Disimpan juga di localStorage biar nggak bolak-balik ketik ulang.</p>
       </div>
       <div class="card-body">
-        <div class="input-group">
-          <label for="vpsUrl">Base URL</label>
-          <div class="input-row">
-            <input
-              type="text"
-              id="vpsUrl"
-              placeholder="https://api.kamu.com  atau  http://123.45.67.89"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button class="btn btn-primary" id="saveVpsBtn">Simpan</button>
-            <button class="btn btn-ghost" id="testVpsBtn">Test Koneksi</button>
-          </div>
-          <p class="hint">Pastikan VPS kamu sudah pakai Caddyfile dengan CORS <code>*</code> (lihat template deploy). Tanpa CORS, request dari Pages akan ke-block browser.</p>
+        <div id="providerGrid" class="provider-grid"></div>
+
+        <div class="actions-row">
+          <button id="updateVpsBtn" class="btn btn-primary btn-large">🚀 Update VPS</button>
+          <button id="testChatBtn" class="btn btn-ghost btn-large">💬 Test Chat</button>
         </div>
+        <p class="hint" id="updateHint">Belum ada update.</p>
       </div>
     </section>
 
-    <!-- ===================== SECTION 2: PROVIDER SESSIONS ===================== -->
-    <section class="card" id="providerSessions">
+    <!-- API endpoint display -->
+    <section class="card">
       <div class="card-header">
-        <h2>2. Sesi / Token Provider</h2>
-        <p class="card-subtitle">Input sesi manual. Token disimpan di <strong>localStorage browser kamu saja</strong> — tidak pernah dikirim ke server mana pun selain VPS kamu sendiri saat test koneksi.</p>
+        <h2>API Endpoints</h2>
+        <p>URL OpenAI-compatible yang aktif di VPS kamu.</p>
       </div>
       <div class="card-body">
-        <div class="provider-grid" id="providerGrid">
-          <!-- Cards di-render oleh app.js -->
-        </div>
+        <div id="endpointList" class="endpoint-list"></div>
       </div>
     </section>
 
-    <!-- ===================== SECTION 3: API ENDPOINTS (AUTO) ===================== -->
-    <section class="card" id="apiEndpoints">
+    <!-- Chat test (hidden by default) -->
+    <section class="card" id="chatSection" hidden>
       <div class="card-header">
-        <h2>3. Auto-Generated API Endpoints</h2>
-        <p class="card-subtitle">URL OpenAI-compatible yang siap dipakai. Update otomatis saat kamu isi sesi/VPS URL.</p>
-      </div>
-      <div class="card-body">
-        <div class="endpoint-list" id="endpointList">
-          <!-- Endpoints di-render oleh app.js -->
-        </div>
-      </div>
-    </section>
-
-    <!-- ===================== SECTION 4: CODE SNIPPETS ===================== -->
-    <section class="card" id="codeSnippets">
-      <div class="card-header">
-        <h2>4. Contoh Kode (Copy-Paste Ready)</h2>
-        <p class="card-subtitle">Pilih bahasa, pilih provider, klik copy. Tinggal paste ke project kamu.</p>
-      </div>
-      <div class="card-body">
-        <div class="snippet-controls">
-          <div class="select-group">
-            <label>Bahasa</label>
-            <select id="snippetLang">
-              <option value="python">Python (openai SDK)</option>
-              <option value="javascript">JavaScript (openai SDK)</option>
-              <option value="curl">cURL</option>
-            </select>
-          </div>
-          <div class="select-group">
-            <label>Provider</label>
-            <select id="snippetProvider">
-              <option value="kimi">Kimi</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="glm">GLM</option>
-              <option value="qwen">Qwen</option>
-            </select>
-          </div>
-        </div>
-        <div class="code-block">
-          <button class="btn btn-ghost btn-copy" id="copySnippetBtn">📋 Copy</button>
-          <pre><code id="snippetOutput"></code></pre>
-        </div>
-      </div>
-    </section>
-
-    <!-- ===================== SECTION 5: CHAT TEST ===================== -->
-    <section class="card" id="chatTest">
-      <div class="card-header">
-        <h2>5. Chat Test (Live)</h2>
-        <p class="card-subtitle">Test langsung ke VPS kamu. Pastikan VPS sudah jalan + sesi sudah diisi + URL VPS sudah diset.</p>
+        <h2>Test Chat</h2>
+        <p>Coba langsung lewat web ini. Request dikirim ke VPS kamu.</p>
       </div>
       <div class="card-body">
         <div class="chat-controls">
-          <div class="select-group">
-            <label>Provider</label>
-            <select id="chatProvider">
-              <option value="kimi">Kimi</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="glm">GLM</option>
-              <option value="qwen">Qwen</option>
-            </select>
-          </div>
-          <div class="select-group">
-            <label>Model</label>
-            <select id="chatModel"></select>
-          </div>
-          <button class="btn btn-ghost" id="refreshModelsBtn">↻ Refresh Model</button>
+          <select id="chatProvider">
+            <option value="kimi">Kimi</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="glm">GLM</option>
+            <option value="qwen">Qwen</option>
+          </select>
+          <select id="chatModel"></select>
+          <button id="refreshModelsBtn" class="btn btn-ghost">↻ Model</button>
         </div>
-        <div class="chat-history" id="chatHistory">
-          <div class="chat-empty">Pilih provider, ketik pesan, lalu kirim.</div>
+        <div id="chatHistory" class="chat-history">
+          <div class="chat-empty">Belum ada pesan.</div>
         </div>
         <div class="chat-input-row">
-          <textarea id="chatInput" placeholder="Ketik pesan..." rows="2"></textarea>
-          <button class="btn btn-primary" id="sendChatBtn">Kirim</button>
-          <button class="btn btn-ghost" id="clearChatBtn">Bersihkan</button>
+          <textarea id="chatInput" placeholder="Ketik pesan... (Ctrl+Enter kirim)" rows="2"></textarea>
+          <button id="sendChatBtn" class="btn btn-primary">Kirim</button>
+          <button id="clearChatBtn" class="btn btn-ghost">Clear</button>
         </div>
-      </div>
-    </section>
-
-    <!-- ===================== SECTION 6: DEPLOY PACKAGE ===================== -->
-    <section class="card" id="deployPackage">
-      <div class="card-header">
-        <h2>6. Download Deploy Package</h2>
-        <p class="card-subtitle">Generate <code>docker-compose.yml</code> + <code>.env</code> + <code>Caddyfile</code> + <code>deploy.sh</code> yang sudah terisi token kamu. Tinggal <code>scp</code> ke VPS dan jalankan <code>bash deploy.sh</code>.</p>
-      </div>
-      <div class="card-body">
-        <div class="deploy-controls">
-          <div class="input-group compact">
-            <label for="deployDomain">Domain (opsional, untuk HTTPS)</label>
-            <input type="text" id="deployDomain" placeholder="api.kamu.com" autocomplete="off" />
-          </div>
-          <div class="input-group compact">
-            <label for="deployIp">VPS IP (wajib kalau domain kosong)</label>
-            <input type="text" id="deployIp" placeholder="123.45.67.89" autocomplete="off" />
-          </div>
-        </div>
-        <div class="download-grid">
-          <button class="btn btn-download" id="dlCompose">📄 docker-compose.yml</button>
-          <button class="btn btn-download" id="dlEnv">📄 .env</button>
-          <button class="btn btn-download" id="dlCaddy">📄 Caddyfile</button>
-          <button class="btn btn-download" id="dlDeploy">📄 deploy.sh</button>
-          <button class="btn btn-download" id="dlReadme">📄 README.md</button>
-          <button class="btn btn-primary btn-download-all" id="dlAll">⬇ Download Semua (5 file)</button>
-        </div>
-        <p class="hint">Setelah download, upload semua file ke VPS, lalu jalankan <code>sudo bash deploy.sh</code>.</p>
-      </div>
-    </section>
-
-    <!-- ===================== SECTION 7: SAFETY NOTICE ===================== -->
-    <section class="card notice-card" id="safetyNotice">
-      <div class="card-body">
-        <h3>⚠️ Catatan Keamanan</h3>
-        <ul>
-          <li>Token/sesi disimpan di <strong>localStorage</strong> browser kamu. Tidak ada server backend di web app ini.</li>
-          <li>Saat test koneksi / chat, request dikirim langsung ke VPS yang kamu set — tidak via server mana pun.</li>
-          <li>Pakai akun <strong>dummy</strong> untuk setiap provider, bukan akun utama.</li>
-          <li>Jika token bocor → sign out dari semua device di provider masing-masing.</li>
-          <li>Endpoint API di VPS <strong>tanpa auth</strong>. Tambahkan <code>basic_auth</code> di Caddyfile kalau mau dipublik.</li>
-        </ul>
       </div>
     </section>
 
   </main>
 
   <footer class="app-footer">
-    <div class="footer-inner">
-      <p>Gateway-LLM · Static web UI for multi-provider LLM routing</p>
-      <p><a href="https://github.com/ARIKO13/Gateway-LLM" target="_blank" rel="noopener">Repository</a> · Backend: <code>vinlic/*-free-api</code> · Reverse proxy: Caddy</p>
-    </div>
+    <p>Static UI · Token di localStorage · Request langsung ke VPS kamu</p>
+    <p><a href="https://github.com/ARIKO13/Gateway-LLM" target="_blank" rel="noopener">Repo</a> · Backend: <code>vinlic/*-free-api</code> · Reverse proxy: Caddy</p>
   </footer>
 
-  <!-- Toast container -->
   <div id="toastContainer" class="toast-container"></div>
 
   <script src="app.js"></script>
