@@ -2,23 +2,34 @@
 
 Strategi nggak kena banned/blocked sama DeepSeek/Kimi/GLM/Qwen.
 
-## Layer 1: Cloudflare Worker Proxy (UTAMA)
+## Layer 1: Cloudflare Worker Proxy (UTAMA, MULTI-PROVIDER)
 
-**Tujuan:** Hide IP VPS dari DeepSeek. DeepSeek liat IP Cloudflare (clean reputation), bukan IP datacenter VPS kamu.
+**Tujuan:** Hide IP VPS dari DeepSeek/Kimi/GLM/Qwen. Provider liat IP Cloudflare (clean reputation), bukan IP datacenter VPS kamu. **1 Worker** untuk semua 4 provider.
 
 ### Setup (5 menit)
 Lihat: [`cloudflare-worker/README.md`](./cloudflare-worker/README.md) + [`cloudflare-worker/worker.js`](./cloudflare-worker/worker.js)
 
-Ringkasnya:
+Worker route by path prefix:
+- `/deepseek/*` → `chat.deepseek.com`
+- `/kimi/*` → `kimi.moonshot.cn`
+- `/glm/*` → `chatglm.cn`
+- `/qwen/*` → `tongyi.aliyun.com`
+
+### Setup singkat
 1. Bikin Cloudflare account (free)
-2. Workers & Pages → Create Worker → paste `worker.js`
-3. Deploy → catat URL Worker
-4. SSH ke VPS:
+2. Create Worker → paste `worker.js`
+3. Deploy → catat Worker URL (mis: `https://llm-proxy.kamu.workers.dev`)
+4. SSH ke VPS, set env vars untuk semua provider:
    ```bash
-   echo 'DEEPSEEK_PROXY_URL=https://YOUR-WORKER.workers.dev' >> /opt/gateway-llm/.env
-   cd /opt/gateway-llm && docker compose up -d --force-recreate --no-deps deepseek-api
+   cat >> /opt/gateway-llm/.env <<EOF
+   DEEPSEEK_PROXY_URL=https://llm-proxy.kamu.workers.dev/deepseek
+   KIMI_PROXY_URL=https://llm-proxy.kamu.workers.dev/kimi
+   GLM_PROXY_URL=https://llm-proxy.kamu.workers.dev/glm
+   QWEN_PROXY_URL=https://llm-proxy.kamu.workers.dev/qwen
+   EOF
+   cd /opt/gateway-llm && docker compose up -d --force-recreate
    ```
-5. Done. DeepSeek sekarang nggak liat IP VPS kamu.
+5. Done. Semua 4 provider sekarang request lewat IP Cloudflare.
 
 ### Verifikasi proxy aktif
 Cek log deepseek-api, request harusnya ke URL Worker:
