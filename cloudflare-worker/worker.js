@@ -1,34 +1,50 @@
 /**
- * Cloudflare Worker: DeepSeek Proxy
+ * Cloudflare Worker: Multi-Provider LLM Proxy
  *
- * Tujuan: Hide VPS IP dari DeepSeek. VPS call Worker ini, Worker call DeepSeek
- * pakai IP edge Cloudflare (reputation lebih tinggi dari IP datacenter).
+ * Route by path prefix:
+ *   /deepseek/*  → https://chat.deepseek.com
+ *   /kimi/*      → https://kimi.moonshot.cn
+ *   /glm/*       → https://chatglm.cn
+ *   /qwen/*      → https://tongyi.aliyun.com
  *
- * Deploy:
- * 1. Login ke https://dash.cloudflare.com (signup free kalau belum punya)
- * 2. Kiri: Workers & Pages → Create application → Worker → Create Worker
- * 3. Beri nama: deepseek-proxy (atau apa pun)
- * 4. Hapus kode hello-world default, paste semua kode ini
- * 5. Klik "Deploy" di kanan atas
- * 6. Setelah deploy, buka tab "Settings" → "Triggers"
- * 7. Catat URL worker (misal: https://deepseek-proxy.namakamu.workers.dev)
- * 8. SSH ke VPS:
- *      echo 'DEEPSEEK_PROXY_URL=https://deepseek-proxy.namakamu.workers.dev' >> /opt/gateway-llm/.env
- *      cd /opt/gateway-llm && docker compose up -d --force-recreate --no-deps deepseek-api
+ * Deploy (sama seperti versi single-provider):
+ * 1. Cloudflare dashboard → Workers & Pages → Create Worker
+ * 2. Beri nama: llm-proxy (atau apa pun)
+ * 3. Hapus default code, paste semua kode ini
+ * 4. Deploy → catat URL (https://llm-proxy.kamu.workers.dev)
  *
- * Free tier Cloudflare Workers:
- * - 100,000 requests/day (cukup untuk personal use + keep-alive cron)
- * - 1000 req/min per worker
- * - 10ms CPU per request (streaming I/O nggak dihitung)
+ * Setup di VPS (setiap provider punya env var sendiri):
+ *   ssh root@176.100.37.238
+ *   cat >> /opt/gateway-llm/.env <<EOF
+ *   DEEPSEEK_PROXY_URL=https://llm-proxy.kamu.workers.dev/deepseek
+ *   KIMI_PROXY_URL=https://llm-proxy.kamu.workers.dev/kimi
+ *   GLM_PROXY_URL=https://llm-proxy.kamu.workers.dev/glm
+ *   QWEN_PROXY_URL=https://llm-proxy.kamu.workers.dev/qwen
+ *   EOF
+ *   cd /opt/gateway-llm && docker compose up -d --force-recreate
  *
- * Cara test Worker (setelah deploy):
- *   curl https://deepseek-proxy.namakamu.workers.dev/api/v0/users/current \
- *     -H "Authorization: Bearer <token>"
- *   → harus return user info DeepSeek
+ * Test:
+ *   curl https://llm-proxy.kamu.workers.dev/deepseek/api/v0/users/current \
+ *     -H "Authorization: Bearer <deepseek_userToken>"
+ *   curl https://llm-proxy.kamu.workers.dev/kimi/api/auth/token/refresh \
+ *     -H "Authorization: Bearer <kimi_refresh_token>"
+ *
+ * Stripping logic:
+ *   Request path /deepseek/api/v0/users/current
+ *   → strip "/deepseek" prefix
+ *   → proxy to https://chat.deepseek.com/api/v0/users/current
+ *   Host header set to chat.deepseek.com biar SNI matching
  */
 
-const TARGET_ORIGIN = 'https://chat.deepseek.com';
+const PROVIDERS = {
+  '/deepseek/': { origin: 'https://chat.deepseek.com', host: 'chat.deepseek.com' },
+  '/kimi/':     { origin: 'https://kimi.moonshot.cn',   host: 'kimi.moonshot.cn' },
+  '/glm/':      { origin: 'https://chatglm.cn',         host: 'chatglm.cn' },
+  '/qwen/':     { origin: 'https://tongyi.aliyun.com',  host: 'tongyi.aliyun.com' },
+};
 
+// Headers yang otomatis ditambah Cloudflare ke outbound request.
+// Strip supaya target nggak detect dipanggil via Worker.
 const STRIP_REQUEST_HEADERS = [
   'cf-connecting-ip',
   'cf-ipcountry',
@@ -48,27 +64,55 @@ const STRIP_RESPONSE_HEADERS = [
   'cf-warp-tag',
 ];
 
+function findProvider(pathname) {
+  for (const [prefix, config] of Object.entries(PROVIDERS)) {
+    if (pathname.startsWith(prefix)) {
+      // Strip prefix, keep leading slash
+      // e.g., /deepseek/api/v0/users/current → /api/v0/users/current
+      const stripped = pathname.slice(prefix.length - 1);
+      return { config, strippedPath: stripped };
+    }
+  }
+  return null;
+}
+
 export default {
   async fetch(request) {
     try {
       const url = new URL(request.url);
-      const targetUrl = TARGET_ORIGIN + url.pathname + url.search;
+      const found = findProvider(url.pathname);
 
+      if (!found) {
+        return new Response(JSON.stringify({
+          error: 'unknown_provider',
+          message: `Path must start with one of: ${Object.keys(PROVIDERS).join(', ')}`,
+          path_received: url.pathname,
+        }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const { config, strippedPath } = found;
+      const targetUrl = config.origin + strippedPath + url.search;
+
+      // Build proxy headers
       const proxyHeaders = new Headers(request.headers);
       for (const h of STRIP_REQUEST_HEADERS) {
         proxyHeaders.delete(h);
       }
-      proxyHeaders.set('Host', 'chat.deepseek.com');
+      proxyHeaders.set('Host', config.host);
 
       const proxyReq = new Request(targetUrl, {
         method: request.method,
         headers: proxyHeaders,
-        body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+        body: (request.method === 'GET' || request.method === 'HEAD') ? undefined : request.body,
         redirect: 'manual',
       });
 
       const response = await fetch(proxyReq);
 
+      // Build response headers
       const respHeaders = new Headers(response.headers);
       for (const h of STRIP_RESPONSE_HEADERS) {
         respHeaders.delete(h);
@@ -77,6 +121,7 @@ export default {
       respHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       respHeaders.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
+      // Handle CORS preflight
       if (request.method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: respHeaders });
       }
@@ -87,7 +132,11 @@ export default {
         headers: respHeaders,
       });
     } catch (err) {
-      return new Response(JSON.stringify({ error: 'proxy_failed', message: err.message }), {
+      return new Response(JSON.stringify({
+        error: 'proxy_failed',
+        message: err.message,
+        stack: err.stack,
+      }), {
         status: 502,
         headers: { 'Content-Type': 'application/json' },
       });
