@@ -301,8 +301,16 @@ async function sendChat() {
       state.chat[key].push({ role: 'error', content: `HTTP ${r.status}\n${t.slice(0,400)}` });
     } else {
       const d = await r.json();
-      const reply = d?.choices?.[0]?.message?.content || '(no response)';
-      state.chat[key].push({ role: 'assistant', content: reply });
+      // Handle vinlic error format: {"code": -2001, "message": "...", "data": null}
+      if (d && typeof d.code === 'number' && d.code !== 0) {
+        state.chat[key].push({
+          role: 'error',
+          content: `Code ${d.code}: ${d.message || '(no message)'}\n\nKemungkinan: token expired / invalid / banned. Ambil ulang token dari web provider.`,
+        });
+      } else {
+        const reply = d?.choices?.[0]?.message?.content || '(no response)';
+        state.chat[key].push({ role: 'assistant', content: reply });
+      }
     }
   } catch (e) {
     state.chat[key].pop();
